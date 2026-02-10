@@ -1,129 +1,59 @@
-const fs = require('fs')
-const path = require('path')
-const crypto = require('crypto')
-const { spawn } = require('child_process')
-const fetch = require('node-fetch')
-const ffmpeg = require('fluent-ffmpeg')
-const webp = require('node-webpmux')
-const { fileTypeFromBuffer } = require('file-type')
+import { sticker } from '../lib/sticker.js'
+import { uploadFile } from '../lib/uploadFile.js'
+import { uploadImage } from '../lib/uploadImage.js'
+import { WebP Moroccan } from 'wa-sticker-formatter' // لو النظام عندك يدعمها
 
-const tmpDir = path.join(__dirname, '../tmp')
-if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir)
-
-/* ================== الحقوق ================== */
-const PACK_NAME = `صلـي على سيدنا ونبينا مـحمـد❤‍🩹
-
-ㅤ .̸̳̔̎̎̎/̸̛̅̅͆̎͞ ̔̿̅ ̄̅̅ ̿ ̿ ̿ ̿ ̿   𝖣𝖠𝖱𝖪 𝖹𝖤𝖭𝖨𝖭 𝖡𝖮𝖳  ♚`
-const AUTHOR = 'Dark Zenin'
-
-/* ================== إضافة Exif ================== */
-async function addExif(webpBuffer) {
-  const img = new webp.Image()
-  const json = {
-    'sticker-pack-id': crypto.randomBytes(32).toString('hex'),
-    'sticker-pack-name': PACK_NAME,
-    'sticker-pack-publisher': AUTHOR,
-    'emojis': ['❤‍🩹']
-  }
-
-  const exifAttr = Buffer.from([
-    0x49,0x49,0x2A,0x00,0x08,0x00,0x00,0x00,
-    0x01,0x00,0x41,0x57,0x07,0x00,0x00,0x00,
-    0x00,0x00,0x16,0x00,0x00,0x00
-  ])
-
-  const jsonBuffer = Buffer.from(JSON.stringify(json), 'utf8')
-  const exif = Buffer.concat([exifAttr, jsonBuffer])
-  exif.writeUIntLE(jsonBuffer.length, 14, 4)
-
-  await img.load(webpBuffer)
-  img.exif = exif
-  return await img.save(null)
-}
-
-/* ================== تحويل صورة → webp ================== */
-async function imageToWebp(buffer) {
-  return new Promise((resolve, reject) => {
-    const input = path.join(tmpDir, `${Date.now()}.jpg`)
-    const output = path.join(tmpDir, `${Date.now()}.webp`)
-
-    fs.writeFileSync(input, buffer)
-
-    ffmpeg(input)
-      .outputOptions([
-        '-vf',
-        'scale=512:512:flags=lanczos:force_original_aspect_ratio=decrease,' +
-        'format=rgba,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=#00000000'
-      ])
-      .toFormat('webp')
-      .save(output)
-      .on('end', () => {
-        const data = fs.readFileSync(output)
-        fs.unlinkSync(input)
-        fs.unlinkSync(output)
-        resolve(data)
-      })
-      .on('error', err => {
-        reject(err)
-      })
-  })
-}
-
-/* ================== تحويل فيديو / GIF → webp ================== */
-async function videoToWebp(buffer) {
-  return new Promise((resolve, reject) => {
-    const input = path.join(tmpDir, `${Date.now()}.mp4`)
-    const output = path.join(tmpDir, `${Date.now()}.webp`)
-
-    fs.writeFileSync(input, buffer)
-
-    ffmpeg(input)
-      .outputOptions([
-        '-vcodec', 'libwebp',
-        '-vf',
-        'scale=512:512:force_original_aspect_ratio=decrease,' +
-        'fps=15,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=#00000000',
-        '-loop', '0',
-        '-an'
-      ])
-      .save(output)
-      .on('end', () => {
-        const data = fs.readFileSync(output)
-        fs.unlinkSync(input)
-        fs.unlinkSync(output)
-        resolve(data)
-      })
-      .on('error', err => {
-        reject(err)
-      })
-  })
-}
-
-/* ================== الدالة الرئيسية ================== */
-async function sticker(input, isUrl = false) {
-  let buffer
-
-  if (isUrl) {
-    const res = await fetch(input)
-    buffer = await res.buffer()
-  } else {
-    buffer = input
-  }
-
-  const type = await fileTypeFromBuffer(buffer)
-
-  let webpBuffer
-  if (/image/.test(type.mime)) {
-    webpBuffer = await imageToWebp(buffer)
-  } else if (/video/.test(type.mime)) {
-    webpBuffer = await videoToWebp(buffer)
-  } else {
-    throw 'نوع غير مدعوم'
-  }
-
-  return await addExif(webpBuffer)
-}
-
-module.exports = {
-  sticker
+let handler = async (m, { conn, args, usedPrefix, command }) => {
+  let stiker = false
+  try {
+    let q = m.quoted ? m.quoted : m
+    let mime = (q.msg || q).mimetype || ''
+    
+    // التحقق إذا كان المرفق صورة أو فيديو
+    if (/webp|image|video/g.test(mime)) {
+      let img = await q.download?.()
+      if (!img) throw `*عذراً، قم بالرد على (صورة) أو (فيديو) بـ ${usedPrefix + command}*`
+      
+      let out
+      try {
+        stiker = await sticker(img, false, global.packname, global.author)
+      } catch (e) {
+        console.error(e)
+      } finally {
+        if (!stiker) {
+          if (/webp/g.test(mime)) out = img
+          else if (/image/g.test(mime)) out = await uploadImage(img)
+          else if (/video/g.test(mime)) out = await uploadFile(img)
+          if (typeof out !== 'string') out = await uploadImage(img)
+          stiker = await sticker(false, out, global.packname, global.author)
+        }
+      }
+    } else if (args[0]) {
+      // إذا أرسل رابط صورة مباشرة
+      if (isUrl(args[0])) stiker = await sticker(false, args[0], global.packname, global.author)
+      else throw '*الرابط الذي أرسلته غير صالح!*'
     }
+  } catch (e) {
+    console.error(e)
+    if (!stiker) stiker = e
+  } finally {
+    if (stiker) {
+        // إرسال الملصق النهائي
+        conn.sendFile(m.chat, stiker, 'sticker.webp', '', m)
+    } else {
+        throw `*خطأ: تأكد من إرسال صورة أو فيديو قصير ثم الرد عليه بكلمة .ملصق*`
+    }
+  }
+}
+
+// الأوامر التي يستجيب لها البوت بالعربي والإنجليزي
+handler.help = ['ملصق', 'sticker']
+handler.tags = ['sticker']
+handler.command = ['ملصق', 'stiker', 'sticker', 'سوي_ملصق'] 
+
+export default handler
+
+const isUrl = (text) => {
+  return text.match(new RegExp(/https?:\/\/(www\.)?[-a-zA-Z0-9@:%._+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_+.~#?&/=]*)(jpe?g|gif|png)/, 'gi'))
+}
+
