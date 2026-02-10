@@ -1,0 +1,19 @@
+export const command = {
+    name: 'زواج',
+    category: 'مرح',
+    async execute(sock, from, msg) {
+        const mentions = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+        
+        if (mentions.length < 2)
+            return sock.sendMessage(from, { text: '👰 منشن شخصين عشان نزوجهم 😂' });
+
+        const m1 = mentions[0].split('@')[0];
+        const m2 = mentions[1].split('@')[0];
+
+        await sock.sendMessage(from, {
+            text: `💍 مبروك الزواج يا @${m1} و @${m2}! \n\nبارك الله لكما وجمع بينكما في خير 😂🕺`,
+            mentions: [mentions[0], mentions[1]]
+        }, { quoted: msg });
+    }
+};
+

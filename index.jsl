@@ -1,0 +1,126 @@
+// index.js
+import makeWASocket, {
+    fetchLatestBaileysVersion,
+    DisconnectReason,
+} from '@whiskeysockets/baileys';
+import { useMultiFileAuthState } from '@whiskeysockets/baileys';
+import P from 'pino';
+
+async function startBot() {
+    const { state, saveCreds } = await useMultiFileAuthState('auth');
+    const { version } = await fetchLatestBaileysVersion();
+    console.log('Using WA v' + version.join('.'));
+
+    const sock = makeWASocket({
+        version,
+        auth: state,
+        printQRInTerminal: true,
+        logger: P({ level: 'silent' }),
+    });
+
+    sock.ev.on('creds.update', saveCreds);
+
+    sock.ev.on('connection.update', (update) => {
+        const { connection, lastDisconnect, qr } = update;
+        if (qr) console.log('📱 امسح QR واتساب: ', qr);
+        if (connection === 'close') {
+            const shouldReconnect =
+                (lastDisconnect.error?.output?.statusCode !== DisconnectReason.loggedOut);
+            console.log('Connection closed. Reconnecting:', shouldReconnect);
+            if (shouldReconnect) startBot();
+        } else if (connection === 'open') {
+            console.log('✅ تم تسجيل الدخول بنجاح!');
+        }
+    });
+
+    // 📨 الردود على الرسائل الفردية
+    sock.ev.on('messages.upsert', async (m) => {
+        const msg = m.messages[0];
+        if (!msg.message || msg.key.fromMe) return;
+
+        const text =
+            msg.message.conversation ||
+            msg.message.extendedTextMessage?.text;
+        const from = msg.key.remoteJid;
+        if (!text) return;
+
+        const lowerText = text.toLowerCase();
+
+        switch (lowerText) {
+            case '!hello':
+                await sock.sendMessage(from, { text: '👋 أهلاً وسهلاً! أنا بوتك الرائع ✨' });
+                break;
+            case '!menu':
+                await sock.sendMessage(from, {
+                    text: `📜 *قائمة الأوامر:*
+1️⃣ !hello - تحية
+2️⃣ !menu - قائمة الأوامر
+3️⃣ !time - الوقت الحالي
+4️⃣ !ping - اختبار البوت
+5️⃣ !sticker - تحويل صورة لملصق
+6️⃣ !photo - إرسال صورة عشوائية
+7️⃣ !bye - وداع
+⚡️ يدعم الردود التلقائية والكلمات`
+                });
+                break;
+            case '!time':
+                await sock.sendMessage(from, { text: `⏰ الوقت الحالي: ${new Date().toLocaleString()}` });
+                break;
+            case '!ping':
+                await sock.sendMessage(from, { text: '🏓 Pong!' });
+                break;
+            case '!bye':
+                await sock.sendMessage(from, { text: '👋 باي باي! نلتقي قريباً ✨' });
+                break;
+            case '!photo':
+                await sock.sendMessage(from, {
+                    image: { url: 'https://picsum.photos/300/300' },
+                    caption: '📷 صورة عشوائية لك!',
+                });
+                break;
+            case '!sticker':
+                await sock.sendMessage(from, { sticker: { url: 'https://picsum.photos/200/200' } });
+                break;
+            default:
+                if (lowerText.includes('مرحبا')) {
+                    await sock.sendMessage(from, { text: '🌟 أهلاً! كيف حالك اليوم؟' });
+                } else if (lowerText.includes('كيفك')) {
+                    await sock.sendMessage(from, { text: '😎 أنا بخير! شكراً لسؤالك ✨' });
+                } else if (lowerText.includes('شكراً')) {
+                    await sock.sendMessage(from, { text: '🙏 العفو! أي وقت 😁' });
+                }
+                break;
+        }
+    });
+
+    // 👥 أحداث المجموعات
+    sock.ev.on('group-participants.update', async (update) => {
+        const groupId = update.id;
+        for (let participant of update.participants) {
+            if (update.action === 'add') {
+                await sock.sendMessage(groupId, {
+                    text: `🎉 أهلاً بك @${participant.split('@')[0]} في المجموعة!`,
+                    mentions: [participant],
+                });
+            } else if (update.action === 'remove') {
+                await sock.sendMessage(groupId, {
+                    text: `👋 وداعاً @${participant.split('@')[0]}، نراك قريباً!`,
+                    mentions: [participant],
+                });
+            }
+        }
+    });
+
+    sock.ev.on('groups.update', async (groups) => {
+        for (let g of groups) {
+            if (g.subject) {
+                await sock.sendMessage(g.id, { text: `📝 تم تغيير اسم المجموعة إلى: ${g.subject}` });
+            }
+            if (g.restrict) {
+                await sock.sendMessage(g.id, { text: '⚠️ تم تقييد تعديل المعلومات في المجموعة!' });
+            }
+        }
+    });
+}
+
+startBot();
