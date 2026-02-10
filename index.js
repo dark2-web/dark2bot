@@ -38,8 +38,7 @@ async function startBot() {
     sock.ev.on('messages.upsert', async (chatUpdate) => {
         try {
             const msg = chatUpdate.messages[0];
-            if (!msg.message || msg.key.fromMe) return;
-
+            if (!msg.message) return; // حذفنا شرط fromMe
             const from = msg.key.remoteJid;
             const sender = msg.key.participant || msg.key.remoteJid;
             const type = getContentType(msg.message);
