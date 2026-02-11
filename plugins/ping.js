@@ -14,7 +14,7 @@ export const command = {
         // تعديل الرسالة بالسرعة النهائية
         const end = Date.now();
         await sock.sendMessage(from, { 
-            text: `*🚀 سرعة الاستجابة:* ${end - start}ms`, 
+            text: `*Dark Zenin-Bot 🚀 سرعة الاستجابة:* ${end - start}ms`, 
             edit: key 
         });
     }
