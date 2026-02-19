@@ -7,7 +7,7 @@ import qrcode from 'qrcode-terminal';
 // ⚙️ إعدادات البوت
 const config = {
     prefix: '.',
-    owner: '966xxxxxxx' 
+    owner: '249966162613' // تم وضع رقمك كصاحب للبوت
 };
 
 // 🔇 مخزن المكتومين العالمي
@@ -18,19 +18,25 @@ async function startBot() {
 
     const sock = makeWASocket({
         auth: state,
-        printQRInTerminal: true, 
+        printQRInTerminal: false, // عطلنا الـ QR عشان نستخدم الكود
         logger: pino({ level: 'silent' }),
         browser: ["Dark Zenin", "Safari", "3.0"]
     });
+
+    // --- كود الربط (Pairing Code) ---
+    if (!sock.authState.creds.registered) {
+        const phoneNumber = '249966162613'; // رقم البوت الخاص بك
+        setTimeout(async () => {
+            let code = await sock.requestPairingCode(phoneNumber);
+            code = code?.match(/.{1,4}/g)?.join('-') || code;
+            console.log(`\n\n📢 DARK ZENIN BOT: كود الربط الخاص بك هو: ${code}\n\n`);
+        }, 3000);
+    }
 
     sock.ev.on('creds.update', saveCreds);
 
     sock.ev.on('connection.update', (update) => {
         const { connection, qr } = update;
-        if (qr) {
-            console.log('📢 DARK ZENIN: مسح الكود لربط الجلسة:');
-            qrcode.generate(qr, { small: true });
-        }
         if (connection === 'open') console.log('✅ DARK ZENIN: ONLINE');
         else if (connection === 'close') startBot();
     });
@@ -38,14 +44,17 @@ async function startBot() {
     sock.ev.on('messages.upsert', async (chatUpdate) => {
         try {
             const msg = chatUpdate.messages[0];
-            if (!msg.message) return; // حذفنا شرط fromMe
+            // تم حذف شرط fromMe عشان يرد عليك وعلى الكل
+            if (!msg.message) return;
+
             const from = msg.key.remoteJid;
             const sender = msg.key.participant || msg.key.remoteJid;
             const type = getContentType(msg.message);
 
-//شوف هل نجحت + ده كود مراقبة المحظورين 
-        const blockedList = JSON.parse(fs.readFileSync('./blocked.json', 'utf8') || '[]');
-        if (blockedList.includes(sender)) return; 
+            // مراقبة المحظورين
+            if (!fs.existsSync('./blocked.json')) fs.writeFileSync('./blocked.json', '[]');
+            const blockedList = JSON.parse(fs.readFileSync('./blocked.json', 'utf8'));
+            if (blockedList.includes(sender)) return; 
 
             let text = "";
             if (type === 'conversation') text = msg.message.conversation;
@@ -66,57 +75,17 @@ async function startBot() {
                 } catch { }
             }
 
-            // 🛡️ [1] فحص الكتم (يحذف فوراً)
+            // 🛡️ فحص الكتم
             if (global.mutedUsers[sender]) {
-                if (isBotAdmin) {
-                    await sock.sendMessage(from, { delete: msg.key });
-                }
+                if (isBotAdmin) await sock.sendMessage(from, { delete: msg.key });
                 return; 
             }
 
-            // 🚫 [2] حماية الروابط
-            if (isGroup && text.includes('chat.whatsapp.com') && isBotAdmin && !isSenderAdmin) {
-                await sock.sendMessage(from, { delete: msg.key });
-                return;
-            }
-
-            // 🎮 [3] نظام الألعاب (بدون نقطة)
-            if (sock.fkk && sock.fkk[from] && text === sock.fkk[from]) {
-                await sock.sendMessage(from, { text: `✅ كفو! إجابة صحيحة: *${text}*` }, { quoted: msg });
-                delete sock.fkk[from];
-                return;
-            }
-
-            // ⚙️ [4] معالجة الأوامر
+            // ⚙️ معالجة الأوامر من المجلد
             if (!text.startsWith(config.prefix)) return;
-
             const args = text.slice(config.prefix.length).trim().split(/ +/);
             const commandName = args.shift().toLowerCase();
 
-            // 🛑 أوامر الكتم (بالشكل الفخم اللي طلبته)
-            if (commandName === 'اكتم' || commandName === 'ميوت') {
-                if (!isSenderAdmin) return;
-                let victim = msg.message?.extendedTextMessage?.contextInfo?.participant || msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
-                if (!victim) return sock.sendMessage(from, { text: '⚠️ رد على الشخص لكتمه' });
-                
-                global.mutedUsers[victim] = true;
-                const muteMsg = `🔇 *تـم كـتـم الـعـضـو @${victim.split('@')[0]} لـمـدة 5 دقـائـق.*\nسيتم حذف رسائله تلقائياً!`;
-                
-                return sock.sendMessage(from, { text: muteMsg, mentions: [victim] }, { quoted: msg });
-            }
-
-            if (commandName === 'تكلم' || commandName === 'فك_الكتم') {
-                if (!isSenderAdmin) return;
-                let victim = msg.message?.extendedTextMessage?.contextInfo?.participant || msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
-                if (!victim) return sock.sendMessage(from, { text: '⚠️ رد على الشخص لفك كتمه' });
-                
-                delete global.mutedUsers[victim];
-                const unmuteMsg = `🔊 *تـم فـك الـكـتـم عـن @${victim.split('@')[0]}*\nيمكنك التحدث الآن بحرية!`;
-                
-                return sock.sendMessage(from, { text: unmuteMsg, mentions: [victim] }, { quoted: msg });
-            }
-
-            // [5] تشغيل الأوامر من مجلد plugins
             const files = fs.readdirSync('./plugins');
             for (const file of files) {
                 if (file.endsWith('.js')) {
@@ -126,12 +95,9 @@ async function startBot() {
                             await plugin.command.execute(sock, from, msg, args);
                             break; 
                         }
-                    } catch (err) {
-                        console.error(`Error in ${file}:`, err);
-                    }
+                    } catch (err) {}
                 }
             }
-
         } catch (err) {
             console.error(err);
         }
@@ -140,3 +106,4 @@ async function startBot() {
 
 keepAlive();
 startBot();
+
