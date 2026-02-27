@@ -1,54 +1,52 @@
-import { keepAlive } from './plugins/keep_alive.js';
-import { makeWASocket, useMultiFileAuthState, delay, getContentType } from '@whiskeysockets/baileys';
-import pino from 'pino';
-import fs from 'fs';
+import makeWASocket, {
+    useMultiFileAuthState,
+    DisconnectReason,
+    fetchLatestBaileysVersion,
+    getContentType
+} from '@whiskeysockets/baileys'
 
-// ⚙️ إعدادات البوت
+import { Boom } from '@hapi/boom'
+import pino from 'pino'
+import qrcode from 'qrcode-terminal'
+import fs from 'fs'
+
 const config = {
     prefix: '.',
-    owner: '249966162613' 
+    owner: '249966162613'
 };
 
-// 🔇 مخزن المكتومين العالمي
 global.mutedUsers = global.mutedUsers || {};
 
 async function startBot() {
-    const { state, saveCreds } = await useMultiFileAuthState('auth');
+    const { state, saveCreds } = await useMultiFileAuthState('auth')
+    const { version } = await fetchLatestBaileysVersion()
 
     const sock = makeWASocket({
+        version,
         auth: state,
-        printQRInTerminal: false, 
+        printQRInTerminal: false,
         logger: pino({ level: 'silent' }),
-        browser: ["Ubuntu", "Chrome", "20.0.04"]
-    });
+        browser: ['Dark Zenin', 'Chrome', '1.0.0']
+    })
 
-    // --- كود الربط (Pairing Code) مع تحسين الانتظار ---
-    if (!sock.authState.creds.registered) {
-        const phoneNumber = '249966162613'; 
-        console.log('⏳ جاري الاتصال بسيرفر واتساب لطلب الكود...');
-        
-        setTimeout(async () => {
-            try {
-                let code = await sock.requestPairingCode(phoneNumber);
-                code = code?.match(/.{1,4}/g)?.join('-') || code;
-                console.log(`\n\n📢 DARK ZENIN BOT: كود الربط الخاص بك هو: ${code}\n\n`);
-            } catch (err) {
-                console.error('❌ تعذر الحصول على كود الربط. تأكد من استقرار الإنترنت وحاول مجدداً.');
-            }
-        }, 10000); // انتظار 10 ثواني لضمان استقرار الاتصال
-    }
+    sock.ev.on('creds.update', saveCreds)
 
-    sock.ev.on('creds.update', saveCreds);
-
-    sock.ev.on('connection.update', (update) => {
-        const { connection, lastDisconnect } = update;
-        if (connection === 'open') {
-            console.log('✅ DARK ZENIN: ONLINE');
-        } else if (connection === 'close') {
-            console.log('🔄 إعادة الاتصال...');
-            startBot();
+    sock.ev.on('connection.update', async (update) => {
+        const { connection, lastDisconnect, qr } = update
+        if (qr) {
+            console.clear()
+            console.log('📢 DARK ZENIN: امسح الكود التالي للربط:')
+            qrcode.generate(qr, { small: true })
         }
-    });
+        if (connection === 'open') {
+            console.clear()
+            console.log('✅ DARK ZENIN: ONLINE')
+        }
+        if (connection === 'close') {
+            const shouldReconnect = lastDisconnect?.error instanceof Boom && lastDisconnect.error.output?.statusCode !== DisconnectReason.loggedOut
+            if (shouldReconnect) startBot()
+        }
+    })
 
     sock.ev.on('messages.upsert', async (chatUpdate) => {
         try {
@@ -56,15 +54,13 @@ async function startBot() {
             if (!msg.message || msg.key.remoteJid === 'status@broadcast') return;
 
             const from = msg.key.remoteJid;
-            const sender = msg.key.participant || msg.key.remoteJid;
             const type = getContentType(msg.message);
-
             let text = "";
             if (type === 'conversation') text = msg.message.conversation;
             else if (type === 'extendedTextMessage') text = msg.message.extendedTextMessage.text;
             else if (type === 'imageMessage') text = msg.message.imageMessage.caption;
+            
             text = text ? text.trim() : "";
-
             if (!text.startsWith(config.prefix)) return;
 
             const args = text.slice(config.prefix.length).trim().split(/ +/);
@@ -83,11 +79,10 @@ async function startBot() {
                 }
             }
         } catch (err) {
-            console.error(err);
+            console.log('❌ خطأ:', err);
         }
     });
 }
 
-keepAlive();
 startBot();
 
