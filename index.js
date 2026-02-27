@@ -6,18 +6,16 @@ import path from 'path';
 import { pathToFileURL } from 'url';
 import { Boom } from '@hapi/boom';
 
-// استخراج الوظائف من المكتبة بشكل يتوافق مع Wileys
-const { 
-    default: makeWASocket, 
-    useMultiFileAuthState, 
-    DisconnectReason, 
-    getContentType 
+const {
+    default: makeWASocket,
+    useMultiFileAuthState,
+    DisconnectReason,
+    getContentType
 } = baileys;
 
-// ⚙️ إعدادات البوت
 const config = {
     prefix: '.',
-    owner: '249966162613' 
+    owner: '249966162613'
 };
 
 global.mutedUsers = global.mutedUsers || {};
@@ -28,19 +26,34 @@ async function startBot() {
 
     const sock = makeWASocket({
         auth: state,
-        printQRInTerminal: true, // خلها true عشان لو طلب QR يظهر لك
+        printQRInTerminal: false, // قفلنا الـ QR عشان نستخدم الرقم
         logger: pino({ level: 'silent' }),
-        browser: ["Dark Zenin", "Chrome", "20.0.04"]
+        browser: ["Ubuntu", "Chrome", "20.0.04"]
     });
+
+    // --- كود طلب رقم الهاتف (الربط بالكود) ---
+    if (!sock.authState.creds.registered) {
+        // رقمك المسجل عندي في المعلومات المحفوظة
+        const phoneNumber = "249966162613"; 
+        
+        setTimeout(async () => {
+            try {
+                let code = await sock.requestPairingCode(phoneNumber);
+                code = code?.match(/.{1,4}/g)?.join('-') || code;
+                console.log('\n\n-----------------------------------');
+                console.log(`🟢 كود الربط الخاص بك هو: ${code}`);
+                console.log('-----------------------------------\n\n');
+            } catch (error) {
+                console.error('❌ فشل طلب كود الربط:', error);
+            }
+        }, 3000);
+    }
+    // ---------------------------------------
 
     sock.ev.on('creds.update', saveCreds);
 
     sock.ev.on('connection.update', (update) => {
-        const { connection, lastDisconnect, qr } = update;
-        
-        if (qr) {
-            console.log('📢 DARK ZENIN: امسح الكود لتفعيل الأزرار!');
-        }
+        const { connection, lastDisconnect } = update;
 
         if (connection === 'open') {
             console.log('✅ DARK ZENIN: ONLINE (Wileys Edition)');
@@ -57,15 +70,15 @@ async function startBot() {
 
             const from = msg.key.remoteJid;
             const type = getContentType(msg.message);
+console.log('نوع الرسالة المستلمة:', type); // سطر لمراقبة المشكلة
 
             let text = "";
             if (type === 'conversation') text = msg.message.conversation;
             else if (type === 'extendedTextMessage') text = msg.message.extendedTextMessage.text;
             else if (type === 'imageMessage') text = msg.message.imageMessage.caption;
-            // دعم قراءة الأزرار
             else if (type === 'buttonsResponseMessage') text = msg.message.buttonsResponseMessage.selectedButtonId;
             else if (type === 'listResponseMessage') text = msg.message.listResponseMessage.singleSelectReply.selectedRowId;
-            
+
             text = text ? text.trim() : "";
 
             if (!text.startsWith(config.prefix)) return;
@@ -81,10 +94,10 @@ async function startBot() {
                     try {
                         const fileUrl = pathToFileURL(path.join(pluginsDir, file)).href;
                         const plugin = await import(`${fileUrl}?update=${Date.now()}`);
-                        
+
                         if (plugin.command && (plugin.command.name === commandName || (plugin.command.alias && plugin.command.alias.includes(commandName)))) {
                             await plugin.command.execute(sock, from, msg, args);
-                            break; 
+                            break;
                         }
                     } catch (err) {
                         console.error(`خطأ في تشغيل ${file}:`, err);
