@@ -1,115 +1,103 @@
-import { keepAlive } from './plugins/keep_alive.js';
-import baileys from '@whiskeysockets/baileys';
-import pino from 'pino';
+import makeWASocket from '@whiskeysockets/baileys';
+import {
+  useMultiFileAuthState,
+  DisconnectReason,
+  fetchLatestBaileysVersion,
+  getContentType
+} from '@whiskeysockets/baileys';
+
+import P from 'pino';
+import qrcode from 'qrcode-terminal';
 import fs from 'fs';
 import path from 'path';
 import { pathToFileURL } from 'url';
-import { Boom } from '@hapi/boom';
-
-const {
-    default: makeWASocket,
-    useMultiFileAuthState,
-    DisconnectReason,
-    getContentType
-} = baileys;
-
-const config = {
-    prefix: '.',
-    owner: '249966162613'
-};
-
-global.mutedUsers = global.mutedUsers || {};
 
 async function startBot() {
-    const authPath = path.join(process.cwd(), 'auth');
-    const { state, saveCreds } = await useMultiFileAuthState(authPath);
+  const { state, saveCreds } = await useMultiFileAuthState('./auth');
+  const { version } = await fetchLatestBaileysVersion();
 
-    const sock = makeWASocket({
-        auth: state,
-        printQRInTerminal: false, // قفلنا الـ QR عشان نستخدم الرقم
-        logger: pino({ level: 'silent' }),
-        browser: ["Ubuntu", "Chrome", "20.0.04"]
-    });
+  // تأكدنا هنا إن استدعاء makeWASocket متوافق مع Wileys
+  const sock = (makeWASocket.default || makeWASocket)({
+    version,
+    logger: P({ level: 'silent' }),
+    auth: state,
+    printQRInTerminal: false,
+    browser: ["Ubuntu", "Chrome", "20.0.04"]
+  });
 
-    // --- كود طلب رقم الهاتف (الربط بالكود) ---
-    if (!sock.authState.creds.registered) {
-        // رقمك المسجل عندي في المعلومات المحفوظة
-        const phoneNumber = "249966162613"; 
-        
-        setTimeout(async () => {
-            try {
-                let code = await sock.requestPairingCode(phoneNumber);
-                code = code?.match(/.{1,4}/g)?.join('-') || code;
-                console.log('\n\n-----------------------------------');
-                console.log(`🟢 كود الربط الخاص بك هو: ${code}`);
-                console.log('-----------------------------------\n\n');
-            } catch (error) {
-                console.error('❌ فشل طلب كود الربط:', error);
-            }
-        }, 3000);
+  sock.ev.on('creds.update', saveCreds);
+
+  sock.ev.on('connection.update', (update) => {
+    const { connection, lastDisconnect, qr } = update;
+    if (qr) {
+      console.log('\n📌 Scan this QR:\n');
+      qrcode.generate(qr, { small: true });
     }
-    // ---------------------------------------
+    if (connection === 'close') {
+      const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
+      if (shouldReconnect) {
+        console.log('🔁 Reconnecting...');
+        startBot();
+      }
+    } else if (connection === 'open') {
+      console.log('✅ DARK ZENIN: ONLINE');
+    }
+  });
 
-    sock.ev.on('creds.update', saveCreds);
+  sock.ev.on('messages.upsert', async (chatUpdate) => {
+    try {
+      const m = chatUpdate.messages[0];
+      if (!m.message || m.key.remoteJid === 'status@broadcast') return;
 
-    sock.ev.on('connection.update', (update) => {
-        const { connection, lastDisconnect } = update;
+      const from = m.key.remoteJid;
+      const type = getContentType(m.message);
+      const prefix = '.'; 
 
-        if (connection === 'open') {
-            console.log('✅ DARK ZENIN: ONLINE (Wileys Edition)');
-        } else if (connection === 'close') {
-            const shouldReconnect = (lastDisconnect?.error instanceof Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
-            if (shouldReconnect) startBot();
-        }
-    });
+      let body = "";
+      if (type === 'conversation') {
+        body = m.message.conversation;
+      } else if (type === 'extendedTextMessage') {
+        body = m.message.extendedTextMessage.text;
+      } else if (type === 'imageMessage') {
+        body = m.message.imageMessage.caption;
+      } else if (type === 'videoMessage') {
+        body = m.message.videoMessage.caption;
+      } else if (type === 'buttonsResponseMessage') {
+        body = m.message.buttonsResponseMessage.selectedButtonId;
+      } else if (type === 'listResponseMessage') {
+        body = m.message.listResponseMessage.singleSelectReply.selectedRowId;
+      } else if (type === 'templateButtonReplyMessage') {
+        body = m.message.templateButtonReplyMessage.selectedId;
+      }
 
-    sock.ev.on('messages.upsert', async (chatUpdate) => {
-        try {
-            const msg = chatUpdate.messages[0];
-            if (!msg || !msg.message || msg.key.remoteJid === 'status@broadcast') return;
+      if (!body) return;
 
-            const from = msg.key.remoteJid;
-            const type = getContentType(msg.message);
-console.log('نوع الرسالة المستلمة:', type); // سطر لمراقبة المشكلة
+      if (body.startsWith(prefix)) {
+        const args = body.slice(prefix.length).trim().split(/ +/);
+        const commandName = args.shift().toLowerCase();
 
-            let text = "";
-            if (type === 'conversation') text = msg.message.conversation;
-            else if (type === 'extendedTextMessage') text = msg.message.extendedTextMessage.text;
-            else if (type === 'imageMessage') text = msg.message.imageMessage.caption;
-            else if (type === 'buttonsResponseMessage') text = msg.message.buttonsResponseMessage.selectedButtonId;
-            else if (type === 'listResponseMessage') text = msg.message.listResponseMessage.singleSelectReply.selectedRowId;
+        const pluginsDir = path.join(process.cwd(), 'plugins');
+        if (!fs.existsSync(pluginsDir)) return;
+        
+        const files = fs.readdirSync(pluginsDir);
 
-            text = text ? text.trim() : "";
-
-            if (!text.startsWith(config.prefix)) return;
-
-            const args = text.slice(config.prefix.length).trim().split(/ +/);
-            const commandName = args.shift().toLowerCase();
-
-            const pluginsDir = path.join(process.cwd(), 'plugins');
-            const files = fs.readdirSync(pluginsDir);
-
-            for (const file of files) {
-                if (file.endsWith('.js') && file !== 'keep_alive.js') {
-                    try {
-                        const fileUrl = pathToFileURL(path.join(pluginsDir, file)).href;
-                        const plugin = await import(`${fileUrl}?update=${Date.now()}`);
-
-                        if (plugin.command && (plugin.command.name === commandName || (plugin.command.alias && plugin.command.alias.includes(commandName)))) {
-                            await plugin.command.execute(sock, from, msg, args);
-                            break;
-                        }
-                    } catch (err) {
-                        console.error(`خطأ في تشغيل ${file}:`, err);
-                    }
-                }
+        for (const file of files) {
+          if (file.endsWith('.js') && file !== 'keep_alive.js') {
+            const fileUrl = pathToFileURL(path.join(pluginsDir, file)).href;
+            const plugin = await import(`${fileUrl}?update=${Date.now()}`);
+            
+            if (plugin.command && (plugin.command.name === commandName || (plugin.command.alias && plugin.command.alias.includes(commandName)))) {
+              await plugin.command.execute(sock, from, m, args);
+              break;
             }
-        } catch (err) {
-            console.error('❌ خطأ في استقبال الرسالة:', err);
+          }
         }
-    });
+      }
+    } catch (err) {
+      console.log('❌ Error in messages.upsert:', err);
+    }
+  });
 }
 
-keepAlive();
 startBot();
 

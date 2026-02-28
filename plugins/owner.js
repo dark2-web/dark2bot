@@ -1,5 +1,5 @@
 export const command = {
-    name: 'المطور',
+    name: 'مطور',
     alias: ['owner', 'المطورين'],
     category: 'حساب',
     async execute(sock, from, msg, args) {

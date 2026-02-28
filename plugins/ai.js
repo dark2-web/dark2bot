@@ -1,41 +1,39 @@
-import axios from 'axios';
+import { GoogleGenerativeAI } from "@google/generative-ai";
+
+// المفتاح اللي أرسلته يا بطل
+const genAI = new GoogleGenerativeAI("AIzaSyD8aPZE-gQ0HRGhDvgrgnLvo_hxcchA9zs");
+const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
 export const command = {
     name: 'ذكاء',
-    alias: ['ai', 'بوت'],
-    category: 'أدوات',
+    alias: ['ai', 'بوت', 'جيمناي', 'زينين'],
+    category: 'ذكاء اصطناعي',
     async execute(sock, from, msg, args) {
-        const question = args.join(' ').trim();
-
-        // (1) التحقق من وجود سؤال
-        if (!question) {
-            return sock.sendMessage(from, { 
-                text: '🤖 أهلاً بك مع خدمة الذكاء الاصطناعي! يرجى كتابة استفسارك بعد الأمر.\n\n*مثال:* .ذكاء ما هي عاصمة السودان؟' 
-            }, { quoted: msg });
-        }
-
-        // (2) فلتر الاحترام
-        const badWords = ['غبي', 'حمار', 'وسخ', 'حقير'];
-        if (badWords.some(word => question.includes(word))) {
-            return sock.sendMessage(from, { 
-                text: '⚠️ نعتذر، يرجى الحفاظ على احترام الحوار لتواصل أفضل وخدمة مستمرة.' 
-            }, { quoted: msg });
-        }
+        const text = args.join(" ");
+        
+        // لو المستخدم ما كتب سؤال
+        if (!text) return await sock.sendMessage(from, { text: "أبشر يا غالي.. أنا معاك، اسألني أي حاجة. \n\nمثلاً: .ذكاء كيف حالك؟" }, { quoted: msg });
 
         try {
-            // المحاولة الأولى: سيرفر مستقر
-            const response = await axios.get(`https://bk9.fun/ai/GPT4?q=${encodeURIComponent(question)}`, { timeout: 15000 });
-            
-            if (response.data && response.data.BK9) {
-                return await sock.sendMessage(from, { text: response.data.BK9 }, { quoted: msg });
-            }
-            throw new Error();
+            // إضافة ريأكشن "تفكير"
+            await sock.sendMessage(from, { react: { text: "🧠", key: msg.key } });
 
+            // صياغة الطلب ليكون باللهجة السودانية وشخصية زينين
+            const prompt = `أنت هو Zenin Bot، بوت واتساب ذكي جداً ومرح. 
+            مطورك الأساسي هو Dark Zenin. 
+            رد بذكاء وبلهجة سودانية محببة وخفيفة على هذا السؤال: ${text}`;
+
+            const result = await model.generateContent(prompt);
+            const response = await result.response;
+            const aiText = response.text();
+
+            // إرسال الرد النهائي
+            await sock.sendMessage(from, { text: aiText }, { quoted: msg });
+            
         } catch (error) {
-            // رسالة اعتذار احترافية في حال تعطل السيرفر أو الشبكة
-            await sock.sendMessage(from, { 
-                text: '🤖 للأسف، هناك مشكلة مؤقتة في الاتصال. يمكنك المحاولة مجدداً بعد قليل. نشكرك على صبرك!' 
-            }, { quoted: msg });
+            console.error("AI Error:", error);
+            await sock.sendMessage(from, { text: "والله يا حبيب حصل ضغط شوية في الشبكة، جرب تسألني تاني." }, { quoted: msg });
         }
     }
 };
+
