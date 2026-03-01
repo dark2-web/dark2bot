@@ -4,9 +4,9 @@ import fs from 'fs';
 import path from 'path';
 import { pathToFileURL } from 'url';
 import express from 'express';
-import qrcode from 'qrcode-terminal';
 import { handleAutoAI } from './plugins/ai.js';
 
+// --- حل مشكلة الاستيراد (Import Fix) ---
 const makeWASocket = baileys.default || baileys;
 const { 
     useMultiFileAuthState, 
@@ -15,11 +15,12 @@ const {
     makeCacheableSignalKeyStore, 
     getContentType 
 } = baileys;
+// ----------------------------------------
 
 const app = express();
 const port = process.env.PORT || 3000;
-app.get('/', (req, res) => res.send('✅ ZENIN BOT IS LIVE!'));
-app.listen(port, () => console.log(`🌐 Web Server on port: ${port}`));
+app.get('/', (req, res) => res.send('✅ ZENIN BOT IS ACTIVE'));
+app.listen(port, () => console.log(`🌐 Server Port: ${port}`));
 
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState('./auth');
@@ -32,26 +33,32 @@ async function startBot() {
             creds: state.creds,
             keys: makeCacheableSignalKeyStore(state.keys, P({ level: 'silent' })),
         },
-        printQRInTerminal: false, // بنطبع الـ QR يدوي عشان نتحكم في الحجم
+        printQRInTerminal: false,
         browser: ["Ubuntu", "Chrome", "20.0.04"]
     });
+
+    if (!sock.authState.creds.registered) {
+        const botNumber = "249966162613";
+        setTimeout(async () => {
+            try {
+                let code = await sock.requestPairingCode(botNumber);
+                code = code?.match(/.{1,4}/g)?.join("-") || code;
+                console.log(`\n\n🔑 PAIRING CODE: 【 ${code} 】\n\n`);
+            } catch (e) {
+                console.log("❌ Pairing code error:", e.message);
+            }
+        }, 10000);
+    }
 
     sock.ev.on('creds.update', saveCreds);
 
     sock.ev.on('connection.update', (update) => {
-        const { connection, lastDisconnect, qr } = update;
-        
-        if (qr) {
-            console.log('\n📌 SCAN THIS QR CODE:\n');
-            qrcode.generate(qr, { small: true }); // 'small: true' بتخلي الـ QR أوضح في شاشات Render
-        }
-
+        const { connection, lastDisconnect } = update;
         if (connection === 'close') {
             const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
-            console.log(`📡 Connection closed. Reconnecting: ${shouldReconnect}`);
             if (shouldReconnect) startBot();
         } else if (connection === 'open') {
-            console.log('✅ DARK ZENIN: ONLINE AND READY');
+            console.log('✅ DARK ZENIN: ONLINE');
         }
     });
 
