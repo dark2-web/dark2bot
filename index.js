@@ -10,9 +10,23 @@ import qrcode from 'qrcode-terminal';
 import fs from 'fs';
 import path from 'path';
 import { pathToFileURL } from 'url';
+import express from 'express'; // أضفنا مكتبة السيرفر
 
 // استيراد وظيفة الرد التلقائي من ملف الـ AI
 import { handleAutoAI } from './plugins/ai.js';
+
+// --- إعداد سيرفر الويب لـ Render ---
+const app = express();
+const port = process.env.PORT || 3000;
+
+app.get('/', (req, res) => {
+  res.send('✅ DARK ZENIN BOT IS RUNNING ON CLOUD!');
+});
+
+app.listen(port, () => {
+  console.log(`🌐 Web Server active on port: ${port}`);
+});
+// ---------------------------------
 
 async function startBot() {
   const { state, saveCreds } = await useMultiFileAuthState('./auth');
