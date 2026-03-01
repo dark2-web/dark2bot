@@ -25,18 +25,17 @@ async function startBot() {
     version,
     logger: P({ level: 'silent' }),
     auth: state,
-    printQRInTerminal: true, // بنخليها true احتياطاً
+    printQRInTerminal: false, // عطلنا الـ QR عشان نعتمد الكود
     browser: ["Ubuntu", "Chrome", "20.0.04"]
   });
 
-  // --- ميزة الربط بالأرقام (Pairing Code) ---
-  // لو مافيش جلسة مسجلة، اطلب كود لـ رقمك
+  // --- ميزة الربط بالأرقام (Pairing Code) لـ رقم البوت ---
   if (!sock.authState.creds.registered) {
-    const phoneNumber = "249112520567"; // رقمك الأساسي يا دارك
+    const botNumber = "249966162613"; // رقم البوت اللي هيرسل الكود
     setTimeout(async () => {
-      let code = await sock.requestPairingCode(phoneNumber);
+      let code = await sock.requestPairingCode(botNumber);
       code = code?.match(/.{1,4}/g)?.join("-") || code;
-      console.log(`\n\n🔑 PAIRING CODE FOR DARK: 【 ${code} 】\n\n`);
+      console.log(`\n\n🔑 PAIRING CODE FOR BOT: 【 ${code} 】\n\n`);
     }, 5000); 
   }
   // ----------------------------------------
