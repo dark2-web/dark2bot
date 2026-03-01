@@ -1,46 +1,80 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import axios from 'axios';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-// مفتاحك شغال وسليم، المشكلة كانت في اسم الموديل
-const genAI = new GoogleGenerativeAI("AIzaSyD8aPZE-gQ0HRGhDvgrgnLvo_hxcchA9zs");
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const configPath = path.join(__dirname, '../data/chatbot.json');
 
-// حنستخدم الموديل بضبط المصنع عشان يشتغل مع المكتبة الجديدة
-const model = genAI.getGenerativeModel({ 
-    model: "gemini-1.5-flash",
-    systemInstruction: "أنت Zenin Bot، بوت واتساب ذكي ومرح من السودان، مطورك هو Dark Zenin. رد بلهجة سودانية خفيفة ومحببة."
-});
+// التأكد من وجود المجلد
+if (!fs.existsSync(path.join(__dirname, '../data'))) fs.mkdirSync(path.join(__dirname, '../data'));
 
 export const command = {
     name: 'ذكاء',
-    alias: ['ai', 'بوت', 'جيمناي', 'زينين'],
+    alias: ['ai', 'chatbot', 'بوت', 'زينين'],
     category: 'ذكاء اصطناعي',
     async execute(sock, from, msg, args) {
         const text = args.join(" ");
-        if (!text) return await sock.sendMessage(from, { text: "أبشر يا كينج.. اسألني أي حاجة في بالك." }, { quoted: msg });
 
-        try {
-            // تفاعل سريع
-            await sock.sendMessage(from, { react: { text: "🧠", key: msg.key } });
-
-            // إرسال النص مباشرة للموديل
-            const result = await model.generateContent(text);
-            const response = result.response;
-            const aiText = response.text();
-
-            // إرسال الرد
-            await sock.sendMessage(from, { text: aiText }, { quoted: msg });
-
-        } catch (error) {
-            console.error("AI Error Detailed:", error);
-            
-            // لو الموديل لسه معصلج (نادر جداً الحين)، حنحاول بموديل بديل فوراً
-            try {
-                const fallbackModel = genAI.getGenerativeModel({ model: "gemini-pro" });
-                const result = await fallbackModel.generateContent(text);
-                await sock.sendMessage(from, { text: result.response.text() }, { quoted: msg });
-            } catch (fallbackError) {
-                await sock.sendMessage(from, { text: "يا غالي الشبكة عالمياً فيها تعليق، جرب كمان دقيقة." }, { quoted: msg });
-            }
+        if (text === 'on') {
+            updateConfig(from, true);
+            return await sock.sendMessage(from, { text: "✅ تم تفعيل الذكاء التلقائي (منشن/ريبلاي) بنجاح!" });
         }
+        if (text === 'off') {
+            updateConfig(from, false);
+            return await sock.sendMessage(from, { text: "❌ تم إيقاف الرد التلقائي." });
+        }
+
+        if (!text) return await sock.sendMessage(from, { text: "أبشر يا كينج.. اسألني أي حاجة أو فعل الرد التلقائي بـ .ذكاء on" });
+
+        await getAIResponse(sock, from, msg, text);
     }
 };
+
+async function getAIResponse(sock, from, msg, query) {
+    try {
+        await sock.sendMessage(from, { react: { text: "🧠", key: msg.key } });
+
+        // استخدمت لك سيرفر "Sandip" لأنه مستقر جداً عالمياً وشغال في السودان
+        const res = await axios.get(`https://sandipbaruwal.onrender.com/gpt?prompt=${encodeURIComponent(query)}`);
+        const result = res.data.answer || res.data.reply || res.data.result;
+
+        if (!result) throw new Error("No response");
+
+        await sock.sendMessage(from, { 
+            text: `*─── ⌊ 𐙚 𝖹𝖤𝖭𝖨𝖭 𝖠𝖨 ⌉ ───*\n\n${result}\n\n*─── ⌊ 𝖯𝖮𝖶𝖤𝖱𝖤𝖣 𝖡𝖸 𝖣𝖠𝖱𝖪 ⌉ ───*`,
+            quoted: msg 
+        });
+    } catch (e) {
+        console.error("AI Error:", e.message);
+        // احتياطي سريع لو الأول فشل
+        try {
+            const res2 = await axios.get(`https://api.simsimi.net/v2/?text=${encodeURIComponent(query)}&lc=ar`);
+            await sock.sendMessage(from, { text: res2.data.success }, { quoted: msg });
+        } catch (err) {
+            await sock.sendMessage(from, { text: "يا غالي السيرفرات تعبانة حالياً، جرب كمان شوية." });
+        }
+    }
+}
+
+function updateConfig(id, status) {
+    let config = fs.existsSync(configPath) ? JSON.parse(fs.readFileSync(configPath)) : {};
+    config[id] = { enabled: status };
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+}
+
+export async function handleAutoAI(sock, from, msg, userText) {
+    if (!fs.existsSync(configPath)) return;
+    const config = JSON.parse(fs.readFileSync(configPath));
+    if (config[from]?.enabled) {
+        const botId = sock.user.id.split(':')[0];
+        const isMentioned = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.some(jid => jid.startsWith(botId));
+        const isReplyToBot = msg.message?.extendedTextMessage?.contextInfo?.participant?.startsWith(botId);
+
+        if (isMentioned || isReplyToBot) {
+            const cleanText = userText.replace(/@\d+/g, '').trim();
+            await getAIResponse(sock, from, msg, cleanText || "هلا");
+        }
+    }
+}
 

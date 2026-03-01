@@ -5,18 +5,19 @@ import {
   fetchLatestBaileysVersion,
   getContentType
 } from '@whiskeysockets/baileys';
-
 import P from 'pino';
 import qrcode from 'qrcode-terminal';
 import fs from 'fs';
 import path from 'path';
 import { pathToFileURL } from 'url';
 
+// استيراد وظيفة الرد التلقائي من ملف الـ AI
+import { handleAutoAI } from './plugins/ai.js';
+
 async function startBot() {
   const { state, saveCreds } = await useMultiFileAuthState('./auth');
   const { version } = await fetchLatestBaileysVersion();
 
-  // تأكدنا هنا إن استدعاء makeWASocket متوافق مع Wileys
   const sock = (makeWASocket.default || makeWASocket)({
     version,
     logger: P({ level: 'silent' }),
@@ -51,9 +52,9 @@ async function startBot() {
 
       const from = m.key.remoteJid;
       const type = getContentType(m.message);
-      const prefix = '.'; 
-
+      const prefix = '.';
       let body = "";
+
       if (type === 'conversation') {
         body = m.message.conversation;
       } else if (type === 'extendedTextMessage') {
@@ -72,20 +73,24 @@ async function startBot() {
 
       if (!body) return;
 
+      // 🤖 ميزة الرد التلقائي (المنشن والريبلاي)
+      // دي اللي بتخلي البوت يرد لوحده لو حد ناداه أو رد عليه
+      await handleAutoAI(sock, from, m, body);
+
+      // ⚙️ نظام تنفيذ الأوامر بالبريفكس (.)
       if (body.startsWith(prefix)) {
         const args = body.slice(prefix.length).trim().split(/ +/);
         const commandName = args.shift().toLowerCase();
-
         const pluginsDir = path.join(process.cwd(), 'plugins');
-        if (!fs.existsSync(pluginsDir)) return;
         
+        if (!fs.existsSync(pluginsDir)) return;
         const files = fs.readdirSync(pluginsDir);
 
         for (const file of files) {
           if (file.endsWith('.js') && file !== 'keep_alive.js') {
             const fileUrl = pathToFileURL(path.join(pluginsDir, file)).href;
             const plugin = await import(`${fileUrl}?update=${Date.now()}`);
-            
+
             if (plugin.command && (plugin.command.name === commandName || (plugin.command.alias && plugin.command.alias.includes(commandName)))) {
               await plugin.command.execute(sock, from, m, args);
               break;
