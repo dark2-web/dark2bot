@@ -6,7 +6,6 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const configPath = path.join(__dirname, '../data/chatbot.json');
 
-// التأكد من وجود المجلد
 if (!fs.existsSync(path.join(__dirname, '../data'))) fs.mkdirSync(path.join(__dirname, '../data'));
 
 export const command = {
@@ -35,7 +34,6 @@ async function getAIResponse(sock, from, msg, query) {
     try {
         await sock.sendMessage(from, { react: { text: "🧠", key: msg.key } });
 
-        // استخدمت لك سيرفر "Sandip" لأنه مستقر جداً عالمياً وشغال في السودان
         const res = await axios.get(`https://sandipbaruwal.onrender.com/gpt?prompt=${encodeURIComponent(query)}`);
         const result = res.data.answer || res.data.reply || res.data.result;
 
@@ -46,13 +44,15 @@ async function getAIResponse(sock, from, msg, query) {
             quoted: msg 
         });
     } catch (e) {
-        console.error("AI Error:", e.message);
-        // احتياطي سريع لو الأول فشل
         try {
             const res2 = await axios.get(`https://api.simsimi.net/v2/?text=${encodeURIComponent(query)}&lc=ar`);
-            await sock.sendMessage(from, { text: res2.data.success }, { quoted: msg });
+            const fallbackResult = res2.data.success || "يا غالي السيرفر مضغوط شوية، جرب تاني.";
+            await sock.sendMessage(from, { 
+                text: `*─── ⌊ 𐙚 𝖹𝖤𝖭𝖨𝖭 𝖠𝖨 ⌉ ───*\n\n${fallbackResult}\n\n*─── ⌊ 𝖯𝖮𝖶𝖤𝖱𝖤𝖣 𝖡𝖸 𝖣𝖠𝖱𝖪 ⌉ ───*`,
+                quoted: msg 
+            });
         } catch (err) {
-            await sock.sendMessage(from, { text: "يا غالي السيرفرات تعبانة حالياً، جرب كمان شوية." });
+            await sock.sendMessage(from, { text: "والله يا كينج السيرفرات كلها قافلة، جرب بعد ثواني." });
         }
     }
 }
@@ -68,10 +68,16 @@ export async function handleAutoAI(sock, from, msg, userText) {
     const config = JSON.parse(fs.readFileSync(configPath));
     if (config[from]?.enabled) {
         const botId = sock.user.id.split(':')[0];
-        const isMentioned = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.some(jid => jid.startsWith(botId));
-        const isReplyToBot = msg.message?.extendedTextMessage?.contextInfo?.participant?.startsWith(botId);
+        
+        // كشف المنشن (التاق)
+        const mentioned = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+        const isBotMentioned = mentioned.some(jid => jid.startsWith(botId));
+        
+        // كشف الريبلاي (الرد على رسالة البوت)
+        const quotedParticipant = msg.message?.extendedTextMessage?.contextInfo?.participant || "";
+        const isReplyToBot = quotedParticipant.startsWith(botId);
 
-        if (isMentioned || isReplyToBot) {
+        if (isBotMentioned || isReplyToBot) {
             const cleanText = userText.replace(/@\d+/g, '').trim();
             await getAIResponse(sock, from, msg, cleanText || "هلا");
         }

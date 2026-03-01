@@ -73,8 +73,7 @@ async function startBot() {
 
       if (!body) return;
 
-      // 🤖 ميزة الرد التلقائي (المنشن والريبلاي)
-      // دي اللي بتخلي البوت يرد لوحده لو حد ناداه أو رد عليه
+      // 🤖 تشغيل الرد التلقائي (المنشن والريبلاي)
       await handleAutoAI(sock, from, m, body);
 
       // ⚙️ نظام تنفيذ الأوامر بالبريفكس (.)
@@ -82,7 +81,7 @@ async function startBot() {
         const args = body.slice(prefix.length).trim().split(/ +/);
         const commandName = args.shift().toLowerCase();
         const pluginsDir = path.join(process.cwd(), 'plugins');
-        
+
         if (!fs.existsSync(pluginsDir)) return;
         const files = fs.readdirSync(pluginsDir);
 
